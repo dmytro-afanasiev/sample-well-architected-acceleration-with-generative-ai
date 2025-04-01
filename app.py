@@ -3,7 +3,6 @@ import os
 import aws_cdk as cdk
 
 from wafr_genai_accelerator.wafr_genai_accelerator_stack import WafrGenaiAcceleratorStack
-from wafr_genai_accelerator.my_example_stack import HelloCdkStack
 
 app = cdk.App()
 
@@ -38,11 +37,5 @@ WafrGenaiAcceleratorStack(app, "WellArchitectedReviewUsingGenAIStack", tags=tags
 
     )
 
-
-HelloCdkStack(
-    app, "HelloCdkStack",
-    tags=tags,
-    env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION'))
-)
 
 app.synth()
