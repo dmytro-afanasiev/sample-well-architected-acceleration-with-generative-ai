@@ -1,4 +1,3 @@
-import os
 from aws_cdk import (
     Stack,
     RemovalPolicy,
@@ -14,14 +13,11 @@ from aws_cdk import (
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
     aws_lambda as _lambda,
-    aws_stepfunctions as sfn,
-    aws_stepfunctions_tasks as tasks,
     aws_sqs as sqs,
     aws_lambda_event_sources as lambda_event_source,
     aws_elasticloadbalancingv2 as elbv2,
     aws_wafv2 as wafv2,
     aws_cognito as cognito,
-    aws_ssm as ssm,
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as tasks,
     aws_lambda_event_sources as lambda_events,
@@ -32,14 +28,12 @@ import aws_cdk.aws_elasticloadbalancingv2_targets as elasticloadbalancingv2_targ
 from aws_cdk.aws_ssm import StringParameter
 import aws_cdk as cdk
 from constructs import Construct
-from aws_cdk.aws_lambda_event_sources import SqsEventSource
 from aws_cdk import Duration
 import re
 
 from cdklabs.generative_ai_cdk_constructs import (
     bedrock 
 )
-import json
 import datetime
 
 class WafrGenaiAcceleratorStack(Stack):
