@@ -12,42 +12,48 @@ logger = logging.getLogger(__name__)
 st.set_page_config(page_title="Login", layout="wide")
 
 
-# Cognito configuration
-COGNITO_USER_POOL_ID = '{{PARAMETER_COGNITO_USER_POOL_ID}}'
-COGNITO_APP_CLIENT_ID = '{{PARAMETER_COGNITO_USER_POOL_CLIENT_ID}}'
-COGNITO_REGION = '{{REGION}}'
+# # Cognito configuration
+# COGNITO_USER_POOL_ID = '{{PARAMETER_COGNITO_USER_POOL_ID}}'
+# COGNITO_APP_CLIENT_ID = '{{PARAMETER_COGNITO_USER_POOL_CLIENT_ID}}'
+# COGNITO_REGION = '{{REGION}}'
 
-if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
-    st.error("Cognito configuration is missing. Please check your SSM parameters or environment variables.")
-    st.stop()
+# if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
+#     st.error("Cognito configuration is missing. Please check your SSM parameters or environment variables.")
+#     st.stop()
 
-logger.info(f"Cognito User Pool ID: {COGNITO_USER_POOL_ID}")
-logger.info(f"Cognito App Client ID: {COGNITO_APP_CLIENT_ID}")
-logger.info(f"Cognito Region: {COGNITO_REGION}")
+# logger.info(f"Cognito User Pool ID: {COGNITO_USER_POOL_ID}")
+# logger.info(f"Cognito App Client ID: {COGNITO_APP_CLIENT_ID}")
+# logger.info(f"Cognito Region: {COGNITO_REGION}")
 
 def authenticate(username, password):
-    client = boto3.client('cognito-idp', region_name=COGNITO_REGION)
-    try:
-        resp = client.initiate_auth(
-            ClientId=COGNITO_APP_CLIENT_ID,
-            AuthFlow='USER_PASSWORD_AUTH',
-            AuthParameters={
-                'USERNAME': username,
-                'PASSWORD': password,
-            }
-        )
+    if username == 'admin' and password == 'admin':
         logger.info(f"Successfully authenticated user: {username}")
         return True, username
-    except client.exceptions.NotAuthorizedException:
-        logger.warning(f"Authentication failed for user: {username}")
-        return False, None
-    except client.exceptions.UserNotFoundException:
-        logger.warning(f"User not found: {username}")
-        return False, None
-    except Exception as e:
-        logger.error(f"An error occurred during authentication: {str(e)}")
-        st.error(f"An error occurred: {str(e)}")
-        return False, None
+    logger.warning(f"Authentication failed for user: {username}")
+    return False, None
+
+    # client = boto3.client('cognito-idp', region_name=COGNITO_REGION)
+    # try:
+    #     resp = client.initiate_auth(
+    #         ClientId=COGNITO_APP_CLIENT_ID,
+    #         AuthFlow='USER_PASSWORD_AUTH',
+    #         AuthParameters={
+    #             'USERNAME': username,
+    #             'PASSWORD': password,
+    #         }
+    #     )
+    #     logger.info(f"Successfully authenticated user: {username}")
+    #     return True, username
+    # except client.exceptions.NotAuthorizedException:
+    #     logger.warning(f"Authentication failed for user: {username}")
+    #     return False, None
+    # except client.exceptions.UserNotFoundException:
+    #     logger.warning(f"User not found: {username}")
+    #     return False, None
+    # except Exception as e:
+    #     logger.error(f"An error occurred during authentication: {str(e)}")
+    #     st.error(f"An error occurred: {str(e)}")
+    #     return False, None
 
 # Main UI
 st.title('Login')

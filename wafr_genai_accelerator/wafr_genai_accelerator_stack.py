@@ -1,3 +1,4 @@
+import os
 from aws_cdk import (
     Stack,
     RemovalPolicy,
@@ -10,20 +11,14 @@ from aws_cdk import (
     custom_resources as cr,
     aws_s3_deployment as s3deploy,
     aws_dynamodb as dynamodb,
-    aws_cloudfront as cloudfront,
-    aws_cloudfront_origins as origins,
     aws_lambda as _lambda,
     aws_sqs as sqs,
     aws_lambda_event_sources as lambda_event_source,
-    aws_elasticloadbalancingv2 as elbv2,
-    aws_wafv2 as wafv2,
-    aws_cognito as cognito,
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as tasks,
     aws_lambda_event_sources as lambda_events,
     aws_logs
 )
-import aws_cdk.aws_elasticloadbalancingv2_targets as elasticloadbalancingv2_targets
 
 from aws_cdk.aws_ssm import StringParameter
 import aws_cdk as cdk
@@ -73,30 +68,19 @@ class WafrGenaiAcceleratorStack(Stack):
         
         KB_ID = kb.knowledge_base_id
 
-        # Create a bucket for server access logs
-        accessLogsBucket = s3.Bucket(self, 'wafr-accelerator-access-logs',
-            bucket_name=f"wafr-accelerator-s3-access-logs-{self.account}-{self.region}",
-            encryption=s3.BucketEncryption.S3_MANAGED,
-            enforce_ssl=True,
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
-            access_control=s3.BucketAccessControl.LOG_DELIVERY_WRITE)
-
-        #Create S3 bucket where well architected reference docs are stored 
+        #Create S3 bucket where well architected reference docs are stored
         #S3 bucket for the knowledge base - name of stack followed by well-architected-knowledge-base-analytics
         wafrReferenceDocsBucket = s3.Bucket(self, 
             'wafr-accelerator-kb', 
             bucket_name=f"wafr-accelerator-kb-{entryTimestamp}",
             enforce_ssl=True,
-            server_access_logs_bucket=accessLogsBucket,
-            server_access_logs_prefix="wafr-reference-docs-logs/",
-            removal_policy=RemovalPolicy.DESTROY, 
+            removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True)
 
         WAFR_REFERENCE_DOCS_BUCKET = wafrReferenceDocsBucket.bucket_name
 
         #Uploading WAFR docs to the corresponding S3 bucket [wafrReferenceDocsBucket]
-        wafrReferenceDeploy = s3deploy.BucketDeployment(self, "uploadwellarchitecteddocs",
+        s3deploy.BucketDeployment(self, "uploadwellarchitecteddocs",
             sources=[s3deploy.Source.asset('well_architected_docs')],
             destination_bucket=wafrReferenceDocsBucket
         )
@@ -106,9 +90,7 @@ class WafrGenaiAcceleratorStack(Stack):
             'wafr-accelerator-upload',
             bucket_name=f"wafr-accelerator-upload-{entryTimestamp}",
             enforce_ssl=True,
-            server_access_logs_bucket=accessLogsBucket,
-            server_access_logs_prefix="wafr-upload-docs-logs/",
-            removal_policy=RemovalPolicy.DESTROY, 
+            removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True)
         
         UPLOAD_BUCKET_NAME = userUploadBucket.bucket_name
@@ -116,15 +98,7 @@ class WafrGenaiAcceleratorStack(Stack):
         DEAD_LETTER_QUEUE_UNIQUE_NAME = "wafrAcceleratorDeadLetterQueue-" + entryTimestamp
         WAFR_ACCELERATOR_QUEUE_UNIQUE_NAME = "wafrAcceleratorQueue-" + entryTimestamp
         
-        # Create a dead-letter queue
-        wafrAcceleratorDeadLetterQueue = sqs.Queue(
-            self,
-            "WAFRAcceleratorDeadLetterQueue",
-            queue_name=DEAD_LETTER_QUEUE_UNIQUE_NAME,
-            encryption=sqs.QueueEncryption.KMS_MANAGED,  # Use the AWS-managed KMS key for SQS
-            enforce_ssl=True
-        )
-        
+
         # Create the main queue with a dead-letter queue
         wafrAcceleratorQueue = sqs.Queue(
             self,
@@ -133,10 +107,6 @@ class WafrGenaiAcceleratorStack(Stack):
             visibility_timeout=Duration.minutes(20),
             retention_period=Duration.days(4),
             delivery_delay=Duration.seconds(5),
-            dead_letter_queue=sqs.DeadLetterQueue(
-                max_receive_count=5,
-                queue=wafrAcceleratorDeadLetterQueue,
-            ),
             encryption=sqs.QueueEncryption.KMS_MANAGED,  # Use the AWS-managed KMS key for SQS
             enforce_ssl=True
         )
@@ -196,6 +166,10 @@ class WafrGenaiAcceleratorStack(Stack):
             )
         
         WAFR_PILLAR_QUESTIONS_PROMPT_TABLE = wafrPillarQuestionPromptsTable.table_name
+
+        existing_permissions_boundary = iam.Role.from_role_name(
+            self, 'ExistingPermissionsBoundary', role_name=os.getenv('WAFR_ROLE_PERMISSIONS_BOUNDARY_NAME')
+        )
         
         # Create an IAM role for the insertWafrPromptsFunctionRole Lambda function
         insertWafrPromptsFunctionRole = iam.Role(
@@ -203,7 +177,8 @@ class WafrGenaiAcceleratorStack(Stack):
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
-            ]
+            ],
+            permissions_boundary=existing_permissions_boundary
         )
         
         insertWafrPromptsFunction = _lambda.Function(self, "insertWAFRPrompts",
@@ -226,8 +201,6 @@ class WafrGenaiAcceleratorStack(Stack):
             bucket_name=f"wafr-prompts-{entryTimestamp}", 
             removal_policy=RemovalPolicy.DESTROY, 
             enforce_ssl=True,
-            server_access_logs_bucket=accessLogsBucket,
-            server_access_logs_prefix="wafr-prompts-logs/",
             auto_delete_objects=True)
             
         promptsBucket.add_event_notification(
@@ -238,36 +211,21 @@ class WafrGenaiAcceleratorStack(Stack):
         promptsBucket.grant_read(insertWafrPromptsFunction)
 
         #Upload bucket for Uploading WAFR docs to the corresponding S3 bucket [docBucket]
-        promptsBucketDeploy = s3deploy.BucketDeployment(self, "promptsBucketDeploy",
+        s3deploy.BucketDeployment(self, "promptsBucketDeploy",
             sources=[s3deploy.Source.asset('wafr-prompts')],
             destination_bucket=promptsBucket
         )
         
         # Create VPC
-        vpc = ec2.Vpc(self, "StreamlitAppVPC-" + entryTimestamp,
-            max_azs=2,
-            nat_gateways=1,
-            subnet_configuration=[
-                ec2.SubnetConfiguration(
-                    subnet_type=ec2.SubnetType.PUBLIC,
-                    name="Public",
-                    cidr_mask=24
-                ),
-                ec2.SubnetConfiguration(
-                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
-                    name="Private",
-                    cidr_mask=24
-                )
-            ]
+        existing_vpc = ec2.Vpc.from_lookup(
+            self, 'ExistingVpc', vpc_id=os.getenv('WAFR_VPC_ID')
         )
-        
+
         # Create Security Group
-        ec2_security_group = ec2.SecurityGroup(self, "StreamlitAppSG" +entryTimestamp,
-            vpc=vpc,
-            description="Security group for Streamlit app",
-            allow_all_outbound=True
+        existing_security_group = ec2.SecurityGroup.from_security_group_id(
+            self, 'ExistingSecurityGroup', os.getenv('WAFR_SG_ID'), mutable=False
         )
-                     
+
     
         # Create IAM role for EC2 instance
         ec2Role = iam.Role(self, "StreamlitAppRole-" + entryTimestamp,
@@ -381,7 +339,8 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            }
+            },
+            permissions_boundary=existing_permissions_boundary
         )
         
         #Reading user_data_script.sh file which contains the linux commands that must be run when the EC2 boots up.
@@ -393,12 +352,11 @@ class WafrGenaiAcceleratorStack(Stack):
         ec2_create = ec2.Instance(self, "StreamlitAppInstance-" + entryTimestamp,
             instance_type=ec2.InstanceType("t2.micro"),
             machine_image=ec2.AmazonLinuxImage(generation=ec2.AmazonLinuxGeneration.AMAZON_LINUX_2023),
-            vpc=vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            security_group=ec2_security_group,
+            vpc=existing_vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+            security_group=existing_security_group,
             role=ec2Role,
-            associate_public_ip_address=False,  # This disables public IPv4
-            #detailed_monitoring=True,
+            associate_public_ip_address=True,
             user_data=ec2.UserData.custom(user_data_script),
             block_devices=[
                 ec2.BlockDevice(
@@ -415,180 +373,14 @@ class WafrGenaiAcceleratorStack(Stack):
         )
 
         EC2_INSTANCE_ID = ec2_create.instance_id
-        
-        alb_security_group = ec2.SecurityGroup(self, "ALBSecurityGroup-" + entryTimestamp,
-            vpc=vpc,
-            allow_all_outbound=True,
-            description="Security group for ALB"
-        )
-        
-        # us-east-1: PrefixList: pl-3b927c52
-        # us-east-2: PrefixList: pl-b6a144df
-        # us-west-1: PrefixList: pl-4ea04527
-        # us-west-2: PrefixList: pl-82a045eb
-        alb_security_group.add_ingress_rule(
-            ec2.Peer.prefix_list("pl-82a045eb"),
-            ec2.Port.HTTP,
-            "Allow inbound connections only from Cloudfront to Streamlit port"
-        )
-        
-        # Create ALB
-        alb = elbv2.ApplicationLoadBalancer(
-            self, 'StreamlitAppALB-' + entryTimestamp,
-            vpc=vpc,
-            internet_facing=True,
-            security_group=alb_security_group
-        )
-        
-        # Enable access logging after ALB creation
-        alb.log_access_logs(
-            bucket=accessLogsBucket,
-            prefix='ec2-alb-logs'  # Optional: Specify a prefix for your log files,
-        )
-            
-        instance_target = elasticloadbalancingv2_targets.InstanceTarget(ec2_create, 8501)
-        
-        # Create target group
-        target_group = elbv2.ApplicationTargetGroup(
-            self, "StreamlitAppTargetGroup-" + entryTimestamp,
-            port=8501,
-            protocol=elbv2.ApplicationProtocol.HTTP,
-            targets=[instance_target], 
-            health_check=elbv2.HealthCheck(
-                path="/",
-                port="8501"
-            ),
-            vpc=vpc
-        )
-        # Add listener to ALB
-        alb.add_listener(
-            "Listener",
-            port=80,
-            default_target_groups=[target_group],
-            open=False
-        )
-        
-        # add access from ALB 
-        ec2_security_group.add_ingress_rule(
-            peer=alb_security_group,
-            connection=ec2.Port.tcp(8501),
-            description="Allow HTTP traffic from ALB"
-        )
-            
+
         #Print the Cloudfront Public Domain Name after CDK Deployment for easier access
         CfnOutput(
             self, "FrontEnd-EC2-Instance-Id",
             value=EC2_INSTANCE_ID,
             description="Front end UI EC2 instance id created at : " + entryTimestampLabel
         )
-        
-        # Create WAF WebACL
-        waf_web_acl = wafv2.CfnWebACL(
-            self, "WAFWebACL",
-            default_action=wafv2.CfnWebACL.DefaultActionProperty(allow={}),
-            scope="REGIONAL",
-            visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
-                cloud_watch_metrics_enabled=True,
-                metric_name="WAFWebACL",
-                sampled_requests_enabled=True
-            ),
-            rules=[
-                wafv2.CfnWebACL.RuleProperty(
-                    name="LimitRequests100",
-                    priority=1,
-                    action=wafv2.CfnWebACL.RuleActionProperty(block={}),
-                    statement=wafv2.CfnWebACL.StatementProperty(
-                        rate_based_statement=wafv2.CfnWebACL.RateBasedStatementProperty(
-                            limit=100,
-                            aggregate_key_type="IP"
-                        )
-                    ),
-                    visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
-                        cloud_watch_metrics_enabled=True,
-                        metric_name="LimitRequests100",
-                        sampled_requests_enabled=True
-                    )
-                )
-            ]
-        )
-        wafv2.CfnWebACLAssociation(self, "WAFWebACLAssociation",
-            resource_arn=alb.load_balancer_arn,
-            web_acl_arn=waf_web_acl.attr_arn
-        )
-        
-        # Uses ALB - Creating CloudFront CDN Distribution
-        cdn = cloudfront.Distribution(self, 'CDN', 
-            comment='CDK created distribution for AWS Well Architect Framework Review (WAFR) Accelerator',
-            default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.LoadBalancerV2Origin(alb, http_port=80, protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY),
-                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
-                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS
-            ),
-            enable_logging=True,
-            log_bucket=accessLogsBucket,
-            log_file_prefix='cloudfront-logs', 
-            minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021 
-        )
-        
-        cdn.apply_removal_policy(RemovalPolicy.DESTROY)
-        
-        #Print the Cloudfront Public Domain Name after CDK Deployment for easier access
-        CfnOutput(
-            self, "CloudFront-Distribution-Domain-Name",
-            value="https://" + cdn.distribution_domain_name,
-            description="The CloudFront Distribution Domain Name"
-        )
-        
-        PARAMETER_COGNITO_USER_POOL_NAME = "WafrAcceleratorUserPool-" + entryTimestamp
-    
-        #add cognito user_pool
-        user_pool = cognito.UserPool(self, PARAMETER_COGNITO_USER_POOL_NAME,
-            user_pool_name="wafr-accelerator-user-pool-" + entryTimestamp,
-            self_sign_up_enabled=False,
-            sign_in_aliases=cognito.SignInAliases(username=True, email=True),
-            auto_verify=cognito.AutoVerifiedAttrs(email=True),
-            password_policy=cognito.PasswordPolicy(
-                min_length=8,
-                require_lowercase=True,
-                require_uppercase=True,
-                require_digits=True,
-                require_symbols=True
-            ),
-            account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
-            removal_policy=RemovalPolicy.DESTROY,
-            advanced_security_mode=cognito.AdvancedSecurityMode.ENFORCED
-        )
-    
-        #Print the Cloudfront Public Domain Name after CDK Deployment for easier access
-        CfnOutput(
-            self, "Cognito-User-Pool-Name",
-            value=PARAMETER_COGNITO_USER_POOL_NAME,
-            description="Cognito user pool created at : " + entryTimestampLabel
-        )        
-        
-        PARAMETER_COGNITO_USER_POOL_ID = user_pool.user_pool_id
-              
-        app_client = user_pool.add_client("WafrAcceleratorAppClient-" + entryTimestamp,
-            user_pool_client_name="wafr-accelerator-app-client-" + entryTimestamp,
-            auth_flows=cognito.AuthFlow(
-                user_password=True,
-                user_srp=True
-            ),
-            o_auth=cognito.OAuthSettings(
-                flows=cognito.OAuthFlows(
-                    authorization_code_grant=True,
-                    implicit_code_grant=True
-                ),
-                scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
-                callback_urls=[f"https://{cdn.distribution_domain_name}", "http://localhost:8501"]
-            ),
-            prevent_user_existence_errors=True
-        )
-        
-        PARAMETER_COGNITO_USER_POOL_CLIENT_ID = app_client.user_pool_client_id
-        
+
         uiPage1UpdateParameter = StringParameter(
             self, "uiPage1UpdateParameter-" + entryTimestamp,
             parameter_name="/wafr-accelerator/" + entryTimestamp + "/1_New_WAFR_Review-updated",
@@ -632,8 +424,6 @@ class WafrGenaiAcceleratorStack(Stack):
             bucket_name=f"wafr-accelerator-ui-{entryTimestamp}", 
             removal_policy=RemovalPolicy.DESTROY, 
             enforce_ssl=True,
-            server_access_logs_bucket=accessLogsBucket,
-            server_access_logs_prefix="wafr-uibucket-logs/",
             auto_delete_objects=True)
         
         # Create an IAM role for the replaceUITokensFunctionRole Lambda function
@@ -695,7 +485,8 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            }
+            },
+            permissions_boundary=existing_permissions_boundary
         )
         
         replaceUITokensFunction = _lambda.Function(self, "replaceUITokensFunction",
@@ -716,8 +507,8 @@ class WafrGenaiAcceleratorStack(Stack):
                 "PARAMETER_1_NEW_WAFR_REVIEW" : PARAMETER_1_NEW_WAFR_REVIEW,
                 "PARAMETER_UI_SYNC_INITAITED_FLAG" : PARAMETER_UI_SYNC_INITAITED_FLAG,
                 "PARAMETER_3_LOGIN_PAGE" : PARAMETER_3_LOGIN_PAGE, 
-                "PARAMETER_COGNITO_USER_POOL_ID" : PARAMETER_COGNITO_USER_POOL_ID ,
-                "PARAMETER_COGNITO_USER_POOL_CLIENT_ID" : PARAMETER_COGNITO_USER_POOL_CLIENT_ID,
+                "PARAMETER_COGNITO_USER_POOL_ID" : 'mocked_cognito_user_pool_id' ,
+                "PARAMETER_COGNITO_USER_POOL_CLIENT_ID" : 'mocked_cognito_user_pool_name',
             },
             role = replaceUITokensFunctionRole,
             events=[lambda_events.S3EventSource(bucket=wafrUIBucket, events=[s3.EventType.OBJECT_CREATED], filters=[s3.NotificationKeyFilter(prefix="tokenized-pages/", suffix=".py")])]
@@ -835,7 +626,8 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            }
+            },
+            permissions_boundary=existing_permissions_boundary
         )
         
         #Define Lambda functions
@@ -929,7 +721,8 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            }
+            },
+            permissions_boundary=existing_permissions_boundary
         )
 
         # Grant the Step Function role permission to invoke the Lambda functions
@@ -1070,11 +863,7 @@ class WafrGenaiAcceleratorStack(Stack):
         
         ec2_create.node.add_dependency(kb)
 
-        ec2Role.node.add_dependency(vpc)
         ec2_create.node.add_dependency(ec2Role)
-        alb.node.add_dependency(ec2_create)
-        target_group.node.add_dependency(ec2_create)
-        cdn.node.add_dependency(alb)
 
         wafrUIBucketDeploy.node.add_dependency(replaceUITokensFunction)
         
