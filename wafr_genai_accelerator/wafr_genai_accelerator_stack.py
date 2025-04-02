@@ -167,8 +167,8 @@ class WafrGenaiAcceleratorStack(Stack):
         
         WAFR_PILLAR_QUESTIONS_PROMPT_TABLE = wafrPillarQuestionPromptsTable.table_name
 
-        existing_permissions_boundary = iam.Role.from_role_name(
-            self, 'ExistingPermissionsBoundary', role_name=os.getenv('WAFR_ROLE_PERMISSIONS_BOUNDARY_NAME')
+        existing_permissions_boundary = iam.ManagedPolicy.from_managed_policy_name(
+            self, 'ExistingPermissionsBoundary', managed_policy_name=os.getenv('WAFR_ROLE_PERMISSIONS_BOUNDARY_NAME')
         )
         
         # Create an IAM role for the insertWafrPromptsFunctionRole Lambda function
