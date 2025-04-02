@@ -58,7 +58,12 @@ class WafrGenaiAcceleratorStack(Stack):
         # Apply tags to all resources in the stack
         for key, value in tags.items():
             Tags.of(self).add(key, value)
-        
+
+        existing_permissions_boundary = iam.ManagedPolicy.from_managed_policy_arn(
+            self, 'ExistingPermissionsBoundary', managed_policy_arn=os.getenv('WAFR_ROLE_PERMISSIONS_BOUNDARY_ARN')
+        )
+        iam.PermissionsBoundary.of(self).apply(existing_permissions_boundary)
+
         #Creates Bedrock KB using the generative_ai_cdk_constructs. More info: https://github.com/awslabs/generative-ai-cdk-constructs
         kb = bedrock.KnowledgeBase(self, 'WAFR-KnowledgeBase', 
                     embeddings_model= bedrock.BedrockFoundationModel.TITAN_EMBED_TEXT_V2_1024, 
@@ -167,10 +172,6 @@ class WafrGenaiAcceleratorStack(Stack):
         
         WAFR_PILLAR_QUESTIONS_PROMPT_TABLE = wafrPillarQuestionPromptsTable.table_name
 
-        existing_permissions_boundary = iam.ManagedPolicy.from_managed_policy_name(
-            self, 'ExistingPermissionsBoundary', managed_policy_name=os.getenv('WAFR_ROLE_PERMISSIONS_BOUNDARY_NAME')
-        )
-        
         # Create an IAM role for the insertWafrPromptsFunctionRole Lambda function
         insertWafrPromptsFunctionRole = iam.Role(
             self, "LambdaRole",
@@ -178,7 +179,6 @@ class WafrGenaiAcceleratorStack(Stack):
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
             ],
-            permissions_boundary=existing_permissions_boundary
         )
         
         insertWafrPromptsFunction = _lambda.Function(self, "insertWAFRPrompts",
@@ -339,8 +339,7 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            },
-            permissions_boundary=existing_permissions_boundary
+            }
         )
         
         #Reading user_data_script.sh file which contains the linux commands that must be run when the EC2 boots up.
@@ -485,8 +484,7 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            },
-            permissions_boundary=existing_permissions_boundary
+            }
         )
         
         replaceUITokensFunction = _lambda.Function(self, "replaceUITokensFunction",
@@ -626,8 +624,7 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            },
-            permissions_boundary=existing_permissions_boundary
+            }
         )
         
         #Define Lambda functions
@@ -721,8 +718,7 @@ class WafrGenaiAcceleratorStack(Stack):
                         )
                     ]
                 )
-            },
-            permissions_boundary=existing_permissions_boundary
+            }
         )
 
         # Grant the Step Function role permission to invoke the Lambda functions
